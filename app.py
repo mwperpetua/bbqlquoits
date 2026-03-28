@@ -25,7 +25,10 @@ class MixerResult:
     rounds: List[Round]
     games_per_player: int
     num_rounds: int
-    player_stats: Dict[str, Dict[str, int]] = field(default_factory=dict) # Added for per-player stats
+    player_stats: Dict[str, Dict[str, int]] = field(default_factory=dict)
+    opponent_matrix: Dict[str, Dict[str, int]] = field(default_factory=dict)
+    partner_matrix: Dict[str, Dict[str, int]] = field(default_factory=dict)
+    num_players_with_extra_games: int = 0 # Added to track players exceeding target
 
 @dataclass
 class MixerConfig:
@@ -41,7 +44,7 @@ class MixerState:
 
 # --- Helper Functions ---
 
-DEFAULT_PLAYERS = "Ekim, dave, scott, derek, sean, erik, merri, doug, ryan"
+DEFAULT_PLAYERS = ""
 
 def shuffle(arr):
     a = list(arr)
@@ -89,13 +92,14 @@ def score_arrangement(
 
 # --- generate_schedule function ---
 
-def generate_schedule(config: MixerConfig) -> MixerState:
+def generate_schedule(config: MixerConfig, arrangement_attempts: int = 5000) -> MixerState:
     players_text = config.players_text
     target_games_per_player = config.target_games_per_player
     num_pits = config.num_pits
 
-    players = [p.strip() for p in re.split(r'[\n,]+', players_text)]
-    players = [p for p in players if p] # Filter out empty strings
+    # Make sure players are unique
+    raw_players = [p.strip() for p in re.split(r'[\n,]+', players_text) if p.strip()]
+    players = list(dict.fromkeys(raw_players))
 
     if len(players) < 4:
         return MixerState(
@@ -116,7 +120,7 @@ def generate_schedule(config: MixerConfig) -> MixerState:
     slots_per_round = num_pits * 4
     active_slots_per_round = (min(len(players), slots_per_round) // 4) * 4
 
-    if active_slots_per_round == 0: # Handle case where not enough players for even one match
+    if active_slots_per_round == 0:
         return MixerState(
             config=config,
             error="Not enough active slots for any matches. Check number of players and pits."
@@ -133,11 +137,13 @@ def generate_schedule(config: MixerConfig) -> MixerState:
     rounds: List[Round] = []
 
     for r in range(num_rounds):
-        # Determine who plays: prioritise players with fewest games played,
+        # Determine who plays: prioritise players with fewest games relative to target,
         # shuffling within tied groups so the order is random each time.
         prioritized = shuffle(players)
+        # Sort key: (games_played_diff_from_target, actual_games_played, random)
+        # This ensures players furthest below target are prioritized, then by fewest actual games, then random for ties
         prioritized.sort(
-            key=lambda p: (games_played[p], random.random()) # Add random for stable sort of tied elements
+            key=lambda p: (games_played[p] - target_games_per_player, games_played[p], random.random())
         )
 
         active = prioritized[:active_slots_per_round]
@@ -147,13 +153,13 @@ def generate_schedule(config: MixerConfig) -> MixerState:
         best_arrangement = shuffle(active)
         best_score = score_arrangement(best_arrangement, partner_count, opponent_count, pit_count)
 
-        for attempt in range(300): # Number of attempts to find a good arrangement
+        for attempt in range(arrangement_attempts):
             candidate = shuffle(active)
             s = score_arrangement(candidate, partner_count, opponent_count, pit_count)
-            if s < best_score: # Lower score is better
+            if s < best_score:
                 best_score = s
                 best_arrangement = candidate
-                if s == 0: # Found a perfect arrangement, no need to try further
+                if s == 0:
                     break
 
         # Build matches from the best arrangement
@@ -191,13 +197,16 @@ def generate_schedule(config: MixerConfig) -> MixerState:
     # Calculate games per player based on the minimum played
     min_games_played = min(games_played.values()) if games_played else 0
 
-    # Consolidate player statistics
+    # Consolidate player statistics and count players with extra games
     player_final_stats = {}
+    num_extra_games_players = 0
     for p in players:
         player_final_stats[p] = {
             'games': games_played[p],
             'byes': byes_count[p]
         }
+        if games_played[p] > target_games_per_player:
+            num_extra_games_players += 1
 
     return MixerState(
         config=config,
@@ -205,7 +214,10 @@ def generate_schedule(config: MixerConfig) -> MixerState:
             rounds=rounds,
             games_per_player=min_games_played,
             num_rounds=num_rounds,
-            player_stats=player_final_stats
+            player_stats=player_final_stats,
+            opponent_matrix=opponent_count,
+            partner_matrix=partner_count,
+            num_players_with_extra_games=num_extra_games_players # Storing the count
         ),
         error=None,
     )
@@ -221,13 +233,20 @@ def format_schedule_to_text(mixer_state: MixerState) -> str:
         num_players = len([p.strip() for p in re.split(r'[\n,]+', mixer_state.config.players_text) if p.strip()])
         output_lines.append(f"Schedule generated successfully for {num_players} players over {mixer_state.result.num_rounds} rounds.")
         output_lines.append(f"Minimum games played per player: {mixer_state.result.games_per_player}")
+        output_lines.append(f"Players with games > target: {mixer_state.result.num_players_with_extra_games}")
 
-        # Player stats
         output_lines.append("\n--- Player Statistics ---")
         for player, stats in mixer_state.result.player_stats.items():
             output_lines.append(f"{player}: Games Played = {stats['games']}, Byes = {stats['byes']}")
 
-        # Rounds
+        output_lines.append("\n--- Player Opponent Matrix ---")
+        opponent_df = get_opponent_matrix_dataframe(mixer_state)
+        output_lines.append(opponent_df.to_string())
+
+        output_lines.append("\n--- Player Partner Matrix ---")
+        partner_df = get_partner_matrix_dataframe(mixer_state)
+        output_lines.append(partner_df.to_string())
+
         for round_data in mixer_state.result.rounds:
             output_lines.append(f"\nRound {round_data.round_number}:")
             if round_data.matches:
@@ -289,11 +308,41 @@ def format_schedule_to_dataframe(mixer_state: MixerState) -> pd.DataFrame:
     df = pd.DataFrame(data)
     return df
 
+def get_opponent_matrix_dataframe(mixer_state: MixerState) -> pd.DataFrame:
+    if mixer_state.error or not mixer_state.result or not mixer_state.result.opponent_matrix:
+        return pd.DataFrame()
+
+    opponent_matrix_dict = mixer_state.result.opponent_matrix
+    players = sorted(list(opponent_matrix_dict.keys()))
+
+    df = pd.DataFrame(0, index=players, columns=players)
+
+    for p1, opponents in opponent_matrix_dict.items():
+        for p2, count in opponents.items():
+            df.loc[p1, p2] = count
+
+    return df
+
+def get_partner_matrix_dataframe(mixer_state: MixerState) -> pd.DataFrame:
+    if mixer_state.error or not mixer_state.result or not mixer_state.result.partner_matrix:
+        return pd.DataFrame()
+
+    partner_matrix_dict = mixer_state.result.partner_matrix
+    players = sorted(list(partner_matrix_dict.keys()))
+
+    df = pd.DataFrame(0, index=players, columns=players)
+
+    for p1, partners in partner_matrix_dict.items():
+        for p2, count in partners.items():
+            df.loc[p1, p2] = count
+
+    return df
+
 # --- Streamlit App Layout ---
 st.set_page_config(layout="wide", page_title="Scheduling Mixer App")
 st.title("Scheduling Mixer")
 
-# Custom CSS for alternating row colors
+# Custom CSS for alternating round background colors (for readability)
 st.markdown("""
 <style>
     .st-emotion-cache-nahz7x div[data-testid="stVerticalBlock"] > div {
@@ -303,10 +352,10 @@ st.markdown("""
         margin-bottom: 1rem;
     }
     .round-odd {
-        background-color: rgba(0, 100, 200, 0.05); /* Light blue for odd rounds */
+        background-color: rgba(0, 100, 200, 0.05);
     }
     .round-even {
-        background-color: rgba(200, 200, 200, 0.05); /* Light grey for even rounds */
+        background-color: rgba(200, 200, 200, 0.05);
     }
 </style>
 """, unsafe_allow_html=True)
@@ -339,6 +388,7 @@ if st.sidebar.button("Generate Schedule"):
         target_games_per_player=target_games_per_player,
         num_pits=num_pits
     )
+    # arrangement_attempts is now defaulted to 5000 inside generate_schedule
     mixer_state = generate_schedule(config)
     st.session_state["mixer_state"] = mixer_state
 
@@ -351,24 +401,39 @@ if "mixer_state" in st.session_state:
     elif mixer_state.result:
         st.subheader("Generated Schedule")
         st.info(f"Minimum games played per player: {mixer_state.result.games_per_player}")
+        st.info(f"Players with games > target: {mixer_state.result.num_players_with_extra_games}")
 
         st.markdown("### Player Statistics")
         player_stats_df = pd.DataFrame.from_dict(mixer_state.result.player_stats, orient='index')
         player_stats_df.index.name = 'Player'
         st.dataframe(player_stats_df)
 
+        st.markdown("### Player Opponent Matrix")
+        opponent_df = get_opponent_matrix_dataframe(mixer_state)
+        if not opponent_df.empty:
+            st.dataframe(opponent_df)
+        else:
+            st.write("No opponent data to display.")
+
+        st.markdown("### Player Partner Matrix")
+        partner_df = get_partner_matrix_dataframe(mixer_state)
+        if not partner_df.empty:
+            st.dataframe(partner_df)
+        else:
+            st.write("No partner data to display.")
+
         st.markdown("### Round Details")
         for i, round_data in enumerate(mixer_state.result.rounds):
-            # Apply alternating background colors
             bg_class = "round-odd" if (i + 1) % 2 != 0 else "round-even"
             st.markdown(f"<div class='{bg_class}'>", unsafe_allow_html=True)
             st.markdown(f"#### Round {round_data.round_number}:")
+
             if round_data.matches:
                 st.markdown("**Matches:**")
                 for match in round_data.matches:
                     st.write(f"  Pit {match.pit}: {', '.join(match.team1)} vs {', '.join(match.team2)}")
             else:
-                st.write("  No matches in this round.")
+                st.write("No matches in this round.")
 
             if round_data.byes:
                 st.markdown("**Byes:**")
@@ -376,10 +441,9 @@ if "mixer_state" in st.session_state:
 
             if not round_data.matches and not round_data.byes:
                 st.write("No activity in this round.")
-            st.markdown("</div>", unsafe_allow_html=True) # Close the div
+            st.markdown("</div>", unsafe_allow_html=True)
 
         st.subheader("Export Options")
-        # Text Export
         st.download_button(
             label="Download Schedule as Text",
             data=format_schedule_to_text(mixer_state),
@@ -387,7 +451,6 @@ if "mixer_state" in st.session_state:
             mime="text/plain"
         )
 
-        # CSV Export
         schedule_df = format_schedule_to_dataframe(mixer_state)
         if not schedule_df.empty:
             csv = schedule_df.to_csv(index=False).encode('utf-8')
