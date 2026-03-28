@@ -261,7 +261,7 @@ st.title("Scheduling Mixer")
 st.sidebar.header("Configuration")
 players_text = st.sidebar.text_area(
     "Players (comma, newline, or space separated)",
-    value=DEFAULT_PLAYERS,
+    value=DEFAULT_PLAYERS = "Ekim, dave, scott, derek, sean, erik, merri, doug, ryan"
     height=150
 )
 num_pits = st.sidebar.slider(
