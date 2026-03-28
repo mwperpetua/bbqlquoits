@@ -41,7 +41,7 @@ class MixerState:
 
 # --- Helper Functions ---
 
-DEFAULT_PLAYERS = "Ekim, dave, scott, derek, sean, erik, merri, doug, ryan"
+DEFAULT_PLAYERS = ""
 
 def shuffle(arr):
     a = list(arr)
