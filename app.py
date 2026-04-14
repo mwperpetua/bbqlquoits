@@ -444,44 +444,35 @@ if "mixer_state" in st.session_state:
                 if round_data.matches:
                     st.markdown("**Matches:**")
                     for match_idx, match in enumerate(round_data.matches):
-                        # New column structure for Pit, Team1, Score1, vs, Team2, Score2 on one line
-                        col_pit_label, col_team1_info, col_score1_input, col_vs_text, col_team2_info, col_score2_input = st.columns([0.1, 0.35, 0.05, 0.05, 0.35, 0.05])
+                        st.markdown(f"##### Pit {match.pit}:")
 
-                        with col_pit_label:
-                            st.write(f"**Pit {match.pit}:**")
+                        # Display Team 1 and its score input vertically
+                        st.write(f"**Team 1:** {', '.join(match.team1)}")
+                        initial_score_t1 = str(match.score_team1) if match.score_team1 is not None else ""
+                        score_t1_str = st.text_input(
+                            "Score Team 1", # Label is now visible
+                            value=initial_score_t1,
+                            key=f"round_{round_data.round_number}_pit_{match.pit}_t1_score",
+                            label_visibility="visible", # Ensure label is visible
+                            max_chars=2
+                        )
+                        st.session_state['current_round_scores'][(round_data.round_number, match.pit, 'team1')] = score_t1_str
 
-                        with col_team1_info:
-                            st.write(f"{', '.join(match.team1)}")
+                        st.markdown("vs")
 
-                        with col_score1_input:
-                            initial_score_t1 = str(match.score_team1) if match.score_team1 is not None else ""
-                            score_t1_str = st.text_input(
-                                "",
-                                value=initial_score_t1,
-                                key=f"round_{round_data.round_number}_pit_{match.pit}_t1_score",
-                                label_visibility="collapsed",
-                                max_chars=2
-                            )
-                            st.session_state['current_round_scores'][(round_data.round_number, match.pit, 'team1')] = score_t1_str
+                        # Display Team 2 and its score input vertically
+                        st.write(f"**Team 2:** {', '.join(match.team2)}")
+                        initial_score_t2 = str(match.score_team2) if match.score_team2 is not None else ""
+                        score_t2_str = st.text_input(
+                            "Score Team 2", # Label is now visible
+                            value=initial_score_t2,
+                            key=f"round_{round_data.round_number}_pit_{match.pit}_t2_score",
+                            label_visibility="visible", # Ensure label is visible
+                            max_chars=2
+                        )
+                        st.session_state['current_round_scores'][(round_data.round_number, match.pit, 'team2')] = score_t2_str
 
-                        with col_vs_text:
-                            st.write("vs")
-
-                        with col_team2_info:
-                            st.write(f"{', '.join(match.team2)}")
-
-                        with col_score2_input:
-                            initial_score_t2 = str(match.score_team2) if match.score_team2 is not None else ""
-                            score_t2_str = st.text_input(
-                                "",
-                                value=initial_score_t2,
-                                key=f"round_{round_data.round_number}_pit_{match.pit}_t2_score",
-                                label_visibility="collapsed",
-                                max_chars=2
-                            )
-                            st.session_state['current_round_scores'][(round_data.round_number, match.pit, 'team2')] = score_t2_str
-
-                        st.markdown("---") # Separator after each match
+                        st.markdown("--- ") # Separator after each match
 
                 else:
                     st.write("No matches in this round.")
