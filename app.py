@@ -445,7 +445,7 @@ if "mixer_state" in st.session_state:
                     st.markdown("**Matches:**")
                     for match_idx, match in enumerate(round_data.matches):
                         # New column structure for Pit, Team1, Score1, vs, Team2, Score2 on one line
-                        col_pit_label, col_team1_info, col_score1_input, col_vs_text, col_team2_info, col_score2_input = st.columns([0.1, 0.35, 0.07, 0.05, 0.35, 0.07])
+                        col_pit_label, col_team1_info, col_score1_input, col_vs_text, col_team2_info, col_score2_input = st.columns([0.1, 0.35, 0.05, 0.05, 0.35, 0.05])
 
                         with col_pit_label:
                             st.write(f"**Pit {match.pit}:**")
