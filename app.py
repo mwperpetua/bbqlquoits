@@ -3,12 +3,8 @@ import random
 import math
 import re
 import pandas as pd
-from dataclasses import dataclass, field, asdict # Import asdict for potential JSON if needed
+from dataclasses import dataclass, field
 from typing import List, Dict, Optional
-
-# import pickle # Added for state persistence
-import cloudpickle as pickle # Using cloudpickle instead of pickle for Streamlit compatibility
-import os # Added for file operations
 
 # --- Data Structures ---
 
@@ -60,7 +56,7 @@ def shuffle(arr):
 def inc(pair_map, a, b):
     if a not in pair_map:
         pair_map[a] = {}
-    if b not in pair_map: # Ensure b is in the top-level map
+    if b not in pair_map:
         pair_map[b] = {}
     pair_map[a][b] = pair_map[a].get(b, 0) + 1
     pair_map[b][a] = pair_map[b].get(a, 0) + 1
@@ -89,10 +85,10 @@ def score_arrangement(
         score += get(opponent_count, p2, p3)
         score += get(opponent_count, p2, p4)
 
-        score += get(pit_count, p1, pit)
-        score += get(pit_count, p2, pit)
-        score += get(pit_count, p3, pit)
-        score += get(pit_count, p4, pit)
+        score += pit_count.get(p1, {}).get(pit, 0)
+        score += pit_count.get(p2, {}).get(pit, 0)
+        score += pit_count.get(p3, {}).get(pit, 0)
+        score += pit_count.get(p4, {}).get(pit, 0)
 
     return score
 
@@ -188,9 +184,7 @@ def generate_schedule(config: MixerConfig, arrangement_attempts: int = 5000) -> 
             inc(opponent_count, p2, p4)
 
             for p in [p1, p2, p3, p4]:
-                if pit_num not in pit_count[p]:
-                    pit_count[p][pit_num] = 0
-                pit_count[p][pit_num] += 1
+                pit_count[p][pit_num] = (pit_count[p].get(pit_num, 0) + 1)
 
         # Update games played and byes count for this round
         for p in active:
@@ -375,55 +369,11 @@ st.markdown("""
 </style>
 """, unsafe_allow_html=True)
 
-# --- State Persistence Functions ---
-
-STATE_FILE_PATH = "mixer_app_state.pkl"
-
-def save_mixer_state_to_file(state: MixerState):
-    try:
-        with open(STATE_FILE_PATH, "wb") as f:
-            pickle.dump(state, f)
-        st.sidebar.success("Schedule and scores saved to disk.")
-        st.sidebar.info(f"Successfully saved state to {STATE_FILE_PATH}")
-    except Exception as e:
-        st.sidebar.error(f"Error saving state: {e}")
-
-def load_mixer_state_from_file():
-    if os.path.exists(STATE_FILE_PATH):
-        try:
-            with open(STATE_FILE_PATH, "rb") as f:
-                loaded_state = pickle.load(f)
-            st.sidebar.info(f"Successfully loaded state from {STATE_FILE_PATH}")
-            return loaded_state
-        except Exception as e:
-            st.sidebar.error(f"Error loading saved state: {e}. Starting fresh.")
-            os.remove(STATE_FILE_PATH) # Remove potentially corrupted file
-            return None
-    else:
-        st.sidebar.info(f"No saved state found at {STATE_FILE_PATH}. Starting fresh.")
-    return None
-
-# Initialize session_state for mixer_state if not present or after reset
-if "mixer_state" not in st.session_state:
-    st.session_state["mixer_state"] = load_mixer_state_from_file()
-
-# Set initial values for sidebar widgets based on loaded/current state
-if st.session_state["mixer_state"] and st.session_state["mixer_state"].config:
-    players_text_initial = st.session_state["mixer_state"].config.players_text
-    num_pits_initial = st.session_state["mixer_state"].config.num_pits
-    target_games_per_player_initial = st.session_state["mixer_state"].config.target_games_per_player
-    if st.session_state["mixer_state"].result: # Only show info if there's an actual result
-        st.sidebar.success("Loaded previous schedule and scores.")
-else:
-    players_text_initial = DEFAULT_PLAYERS
-    num_pits_initial = 3
-    target_games_per_player_initial = 6
-
 # Input widgets
 st.sidebar.header("Configuration")
 players_text = st.sidebar.text_area(
     "Players (comma, newline, or space separated)",
-    value=players_text_initial,
+    value=DEFAULT_PLAYERS,
     height=150
 )
 
@@ -433,11 +383,11 @@ st.sidebar.write(f"Total Players: **{len(current_players)}**")
 
 num_pits = st.sidebar.slider(
     "Number of Pits",
-    min_value=1, max_value=10, value=num_pits_initial, step=1
+    min_value=1, max_value=10, value=3, step=1
 )
 target_games_per_player = st.sidebar.slider(
     "Target Games per Player",
-    min_value=1, max_value=50, value=target_games_per_player_initial, step=1
+    min_value=1, max_value=50, value=6, step=1
 )
 
 # Generate schedule button
@@ -450,23 +400,12 @@ if st.sidebar.button("Generate Schedule"):
     # arrangement_attempts is now defaulted to 5000 inside generate_schedule
     mixer_state = generate_schedule(config)
     st.session_state["mixer_state"] = mixer_state
-    st.session_state['current_round_scores'] = {} # Reset scores input dict
-    if mixer_state.result: # Only save if generation was successful and no error
-        save_mixer_state_to_file(mixer_state)
-    st.rerun() # Rerun to update main display and sidebar values
+    # Initialize scores for new schedule
+    st.session_state['current_round_scores'] = {}
 
-# Reset button
-if st.sidebar.button("Reset Schedule and Scores"):
-    if os.path.exists(STATE_FILE_PATH):
-        os.remove(STATE_FILE_PATH)
-        st.sidebar.info(f"Removed saved state file: {STATE_FILE_PATH}")
-    st.session_state["mixer_state"] = None
-    st.session_state['current_round_scores'] = {} # Clear any current score inputs
-    st.sidebar.success("Schedule and scores reset.")
-    st.rerun()
 
 # Display results
-if st.session_state["mixer_state"]: # Check if mixer_state is not None
+if "mixer_state" in st.session_state:
     mixer_state = st.session_state["mixer_state"]
 
     if mixer_state.error:
@@ -504,10 +443,6 @@ if st.session_state["mixer_state"]: # Check if mixer_state is not None
             with st.form(key=f"round_form_{round_data.round_number}"):
                 if round_data.matches:
                     st.markdown("**Matches:**")
-                    # Ensure current_round_scores is initialized for this rerun if it somehow got cleared
-                    if 'current_round_scores' not in st.session_state:
-                        st.session_state['current_round_scores'] = {}
-
                     for match_idx, match in enumerate(round_data.matches):
                         st.markdown(f"##### Pit {match.pit}:")
 
@@ -551,32 +486,22 @@ if st.session_state["mixer_state"]: # Check if mixer_state is not None
 
                 submitted = st.form_submit_button(f"Save Scores for Round {round_data.round_number}")
                 if submitted:
-                    st.info(f"DEBUG: Form for Round {round_data.round_number} submitted! (submitted={submitted})")
                     for match in round_data.matches: # Iterating over matches directly
                         score1_key = (round_data.round_number, match.pit, 'team1')
                         score2_key = (round_data.round_number, match.pit, 'team2')
 
-                        score_t1_str = st.session_state['current_round_scores'].get(score1_key, "")
-                        score_t2_str = st.session_state['current_round_scores'].get(score2_key, "")
-
-                        st.write(f"DEBUG: Round {round_data.round_number} Pit {match.pit} - Read T1 Score: '{score_t1_str}', T2 Score: '{score_t2_str}'")
+                        score_t1_str = st.session_state['current_round_scores'][score1_key]
+                        score_t2_str = st.session_state['current_round_scores'][score2_key]
 
                         try:
                             match.score_team1 = int(score_t1_str) if score_t1_str else None
                             match.score_team2 = int(score_t2_str) if score_t2_str else None
                         except ValueError:
                             st.warning(f"Invalid score entered for Round {round_data.round_number}, Pit {match.pit}. Scores must be numbers or left blank.")
-                            match.score_team1 = None # Set to None if invalid to ensure state is clear
-                            match.score_team2 = None
-                            # Continue is fine here, as the loop proceeds to the next match, and we want to try to save valid scores for other matches.
-                            continue
+                            continue # Skip to the next match if conversion fails
 
-                    st.write(f"DEBUG: MixerState.result.rounds[{round_data.round_number - 1}].matches (after score update, before saving): {mixer_state.result.rounds[round_data.round_number - 1].matches}")
-
-                    save_mixer_state_to_file(mixer_state) # Save state after scores are updated
+                    st.session_state["mixer_state"] = mixer_state # Update session state to trigger rerun with new scores
                     st.success(f"Scores for Round {round_data.round_number} saved!")
-                    # Temporarily removed st.rerun() to allow debug messages to be visible
-                    # st.rerun()
 
             st.markdown("</div>", unsafe_allow_html=True)
 
