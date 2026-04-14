@@ -444,22 +444,17 @@ if "mixer_state" in st.session_state:
                 if round_data.matches:
                     st.markdown("**Matches:**")
                     for match_idx, match in enumerate(round_data.matches):
-                        # Row for Pit label, Team names, and "vs"
-                        col_pit_label, col_team1_players, col_vs_text, col_team2_players = st.columns([0.1, 0.4, 0.05, 0.45])
+                        # New column structure for Pit, Team1, Score1, vs, Team2, Score2 on one line
+                        col_pit_label, col_team1_info, col_score1_input, col_vs_text, col_team2_info, col_score2_input = st.columns([0.1, 0.35, 0.07, 0.05, 0.35, 0.07])
+
                         with col_pit_label:
                             st.write(f"**Pit {match.pit}:**")
-                        with col_team1_players:
+
+                        with col_team1_info:
                             st.write(f"{', '.join(match.team1)}")
-                        with col_vs_text:
-                            st.write("vs")
-                        with col_team2_players:
-                            st.write(f"{', '.join(match.team2)}")
 
-                        # Row for score input boxes, aligned directly below the team names.
-                        col_empty_align_pit, col_score1_val, col_spacer_1, col_score2_val, col_spacer_2 = st.columns([0.1, 0.08, 0.37, 0.08, 0.37])
-
-                        with col_score1_val:
-                            initial_score_t1 = str(match.score_team1 if match.score_team1 is not None else 0)
+                        with col_score1_input:
+                            initial_score_t1 = str(match.score_team1) if match.score_team1 is not None else ""
                             score_t1_str = st.text_input(
                                 "",
                                 value=initial_score_t1,
@@ -469,8 +464,14 @@ if "mixer_state" in st.session_state:
                             )
                             st.session_state['current_round_scores'][(round_data.round_number, match.pit, 'team1')] = score_t1_str
 
-                        with col_score2_val:
-                            initial_score_t2 = str(match.score_team2 if match.score_team2 is not None else 0)
+                        with col_vs_text:
+                            st.write("vs")
+
+                        with col_team2_info:
+                            st.write(f"{', '.join(match.team2)}")
+
+                        with col_score2_input:
+                            initial_score_t2 = str(match.score_team2) if match.score_team2 is not None else ""
                             score_t2_str = st.text_input(
                                 "",
                                 value=initial_score_t2,
@@ -498,14 +499,14 @@ if "mixer_state" in st.session_state:
                         score1_key = (round_data.round_number, match.pit, 'team1')
                         score2_key = (round_data.round_number, match.pit, 'team2')
 
+                        score_t1_str = st.session_state['current_round_scores'][score1_key]
+                        score_t2_str = st.session_state['current_round_scores'][score2_key]
+
                         try:
-                            # Retrieve string value from session state and convert to int
-                            match.score_team1 = int(st.session_state['current_round_scores'][score1_key])
-                            match.score_team2 = int(st.session_state['current_round_scores'][score2_key])
+                            match.score_team1 = int(score_t1_str) if score_t1_str else None
+                            match.score_team2 = int(score_t2_str) if score_t2_str else None
                         except ValueError:
-                            st.warning(f"Invalid score entered for Round {round_data.round_number}, Pit {match.pit}. Scores must be numbers.")
-                            # If invalid, we don't update this specific match's scores, they retain their previous valid value or None.
-                            # The loop will continue for other matches.
+                            st.warning(f"Invalid score entered for Round {round_data.round_number}, Pit {match.pit}. Scores must be numbers or left blank.")
                             continue # Skip to the next match if conversion fails
 
                     st.session_state["mixer_state"] = mixer_state # Update session state to trigger rerun with new scores
