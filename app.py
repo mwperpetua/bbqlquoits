@@ -444,42 +444,50 @@ if "mixer_state" in st.session_state:
                 if round_data.matches:
                     st.markdown("**Matches:**")
                     for match_idx, match in enumerate(round_data.matches):
-                        col1, col2, col3, col4, col5 = st.columns([0.2, 0.2, 0.1, 0.2, 0.2])
-                        with col1:
-                            st.write(f"Pit {match.pit}:")
-                        with col2:
+                        # Row for Pit label, Team names, and "vs"
+                        col_pit_label, col_team1_players, col_vs_text, col_team2_players = st.columns([0.1, 0.4, 0.05, 0.45])
+                        with col_pit_label:
+                            st.write(f"**Pit {match.pit}:**")
+                        with col_team1_players:
                             st.write(f"{', '.join(match.team1)}")
-                            # Changed to text_input
+                        with col_vs_text:
+                            st.write("vs")
+                        with col_team2_players:
+                            st.write(f"{', '.join(match.team2)}")
+
+                        # Row for score input boxes, aligned directly below the team names.
+                        col_empty_align_pit, col_score1_val, col_spacer_1, col_score2_val, col_spacer_2 = st.columns([0.1, 0.08, 0.37, 0.08, 0.37])
+
+                        with col_score1_val:
                             initial_score_t1 = str(match.score_team1 if match.score_team1 is not None else 0)
                             score_t1_str = st.text_input(
                                 "",
                                 value=initial_score_t1,
                                 key=f"round_{round_data.round_number}_pit_{match.pit}_t1_score",
-                                label_visibility="collapsed"
+                                label_visibility="collapsed",
+                                max_chars=2
                             )
-                        with col3:
-                            st.write(f"vs")
-                        with col4:
-                            st.write(f"{', '.join(match.team2)}")
-                            # Changed to text_input
+                            st.session_state['current_round_scores'][(round_data.round_number, match.pit, 'team1')] = score_t1_str
+
+                        with col_score2_val:
                             initial_score_t2 = str(match.score_team2 if match.score_team2 is not None else 0)
                             score_t2_str = st.text_input(
                                 "",
                                 value=initial_score_t2,
                                 key=f"round_{round_data.round_number}_pit_{match.pit}_t2_score",
-                                label_visibility="collapsed"
+                                label_visibility="collapsed",
+                                max_chars=2
                             )
+                            st.session_state['current_round_scores'][(round_data.round_number, match.pit, 'team2')] = score_t2_str
 
-                        # Store current input values (as strings) in session state for potential re-submission
-                        st.session_state['current_round_scores'][(round_data.round_number, match.pit, 'team1')] = score_t1_str
-                        st.session_state['current_round_scores'][(round_data.round_number, match.pit, 'team2')] = score_t2_str
+                        st.markdown("---") # Separator after each match
 
                 else:
                     st.write("No matches in this round.")
 
                 if round_data.byes:
                     st.markdown("**Byes:**")
-                    st.write(f"{', '.join(round_data.byes)}")
+                    st.write(f"    {', '.join(round_data.byes)}")
 
                 if not round_data.matches and not round_data.byes:
                     st.write("No activity in this round.")
@@ -489,7 +497,7 @@ if "mixer_state" in st.session_state:
                     for match in round_data.matches: # Iterating over matches directly
                         score1_key = (round_data.round_number, match.pit, 'team1')
                         score2_key = (round_data.round_number, match.pit, 'team2')
-                        
+
                         try:
                             # Retrieve string value from session state and convert to int
                             match.score_team1 = int(st.session_state['current_round_scores'][score1_key])
