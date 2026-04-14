@@ -13,6 +13,8 @@ class Match:
     pit: int
     team1: List[str]
     team2: List[str]
+    score_team1: Optional[int] = None
+    score_team2: Optional[int] = None
 
 @dataclass
 class Round:
@@ -252,7 +254,10 @@ def format_schedule_to_text(mixer_state: MixerState) -> str:
             if round_data.matches:
                 output_lines.append("  Matches:")
                 for match in round_data.matches:
-                    output_lines.append(f"    Pit {match.pit}: {', '.join(match.team1)} vs {', '.join(match.team2)}")
+                    score_str = "" # Initialize an empty string for scores
+                    if match.score_team1 is not None and match.score_team2 is not None:
+                        score_str = f" ({match.score_team1}-{match.score_team2})"
+                    output_lines.append(f"    Pit {match.pit}: {', '.join(match.team1)} vs {', '.join(match.team2)}{score_str}")
             else:
                 output_lines.append("  No matches in this round.")
 
@@ -287,7 +292,9 @@ def format_schedule_to_dataframe(mixer_state: MixerState) -> pd.DataFrame:
                 'Team1 Player2': match.team1[1],
                 'Team2 Player1': match.team2[0],
                 'Team2 Player2': match.team2[1],
-                'Status': 'Playing'
+                'Status': 'Playing',
+                'Team1 Score': match.score_team1,
+                'Team2 Score': match.score_team2
             })
 
         # Process byes
@@ -299,7 +306,9 @@ def format_schedule_to_dataframe(mixer_state: MixerState) -> pd.DataFrame:
                 'Team1 Player2': None,
                 'Team2 Player1': None,
                 'Team2 Player2': None,
-                'Status': 'Bye'
+                'Status': 'Bye',
+                'Team1 Score': None,
+                'Team2 Score': None
             })
 
     if not data:
@@ -391,6 +400,9 @@ if st.sidebar.button("Generate Schedule"):
     # arrangement_attempts is now defaulted to 5000 inside generate_schedule
     mixer_state = generate_schedule(config)
     st.session_state["mixer_state"] = mixer_state
+    # Initialize scores for new schedule
+    st.session_state['current_round_scores'] = {}
+
 
 # Display results
 if "mixer_state" in st.session_state:
@@ -428,19 +440,69 @@ if "mixer_state" in st.session_state:
             st.markdown(f"<div class='{bg_class}'>", unsafe_allow_html=True)
             st.markdown(f"#### Round {round_data.round_number}:")
 
-            if round_data.matches:
-                st.markdown("**Matches:**")
-                for match in round_data.matches:
-                    st.write(f"  Pit {match.pit}: {', '.join(match.team1)} vs {', '.join(match.team2)}")
-            else:
-                st.write("No matches in this round.")
+            with st.form(key=f"round_form_{round_data.round_number}"):
+                if round_data.matches:
+                    st.markdown("**Matches:**")
+                    for match_idx, match in enumerate(round_data.matches):
+                        col1, col2, col3, col4, col5 = st.columns([0.2, 0.2, 0.1, 0.2, 0.2])
+                        with col1:
+                            st.write(f"Pit {match.pit}:")
+                        with col2:
+                            st.write(f"{', '.join(match.team1)}")
+                            # Changed to text_input
+                            initial_score_t1 = str(match.score_team1 if match.score_team1 is not None else 0)
+                            score_t1_str = st.text_input(
+                                "",
+                                value=initial_score_t1,
+                                key=f"round_{round_data.round_number}_pit_{match.pit}_t1_score",
+                                label_visibility="collapsed"
+                            )
+                        with col3:
+                            st.write(f"vs")
+                        with col4:
+                            st.write(f"{', '.join(match.team2)}")
+                            # Changed to text_input
+                            initial_score_t2 = str(match.score_team2 if match.score_team2 is not None else 0)
+                            score_t2_str = st.text_input(
+                                "",
+                                value=initial_score_t2,
+                                key=f"round_{round_data.round_number}_pit_{match.pit}_t2_score",
+                                label_visibility="collapsed"
+                            )
 
-            if round_data.byes:
-                st.markdown("**Byes:**")
-                st.write(f"{', '.join(round_data.byes)}")
+                        # Store current input values (as strings) in session state for potential re-submission
+                        st.session_state['current_round_scores'][(round_data.round_number, match.pit, 'team1')] = score_t1_str
+                        st.session_state['current_round_scores'][(round_data.round_number, match.pit, 'team2')] = score_t2_str
 
-            if not round_data.matches and not round_data.byes:
-                st.write("No activity in this round.")
+                else:
+                    st.write("No matches in this round.")
+
+                if round_data.byes:
+                    st.markdown("**Byes:**")
+                    st.write(f"{', '.join(round_data.byes)}")
+
+                if not round_data.matches and not round_data.byes:
+                    st.write("No activity in this round.")
+
+                submitted = st.form_submit_button(f"Save Scores for Round {round_data.round_number}")
+                if submitted:
+                    for match in round_data.matches: # Iterating over matches directly
+                        score1_key = (round_data.round_number, match.pit, 'team1')
+                        score2_key = (round_data.round_number, match.pit, 'team2')
+                        
+                        try:
+                            # Retrieve string value from session state and convert to int
+                            match.score_team1 = int(st.session_state['current_round_scores'][score1_key])
+                            match.score_team2 = int(st.session_state['current_round_scores'][score2_key])
+                        except ValueError:
+                            st.warning(f"Invalid score entered for Round {round_data.round_number}, Pit {match.pit}. Scores must be numbers.")
+                            # If invalid, we don't update this specific match's scores, they retain their previous valid value or None.
+                            # The loop will continue for other matches.
+                            continue # Skip to the next match if conversion fails
+
+                    st.session_state["mixer_state"] = mixer_state # Update session state to trigger rerun with new scores
+                    st.success(f"Scores for Round {round_data.round_number} saved!")
+
             st.markdown("</div>", unsafe_allow_html=True)
 
         st.subheader("Export Options")
