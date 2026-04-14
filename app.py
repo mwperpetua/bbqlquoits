@@ -3,8 +3,11 @@ import random
 import math
 import re
 import pandas as pd
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, asdict # Import asdict for potential JSON if needed
 from typing import List, Dict, Optional
+
+import pickle # Added for state persistence
+import os # Added for file operations
 
 # --- Data Structures ---
 
@@ -369,11 +372,50 @@ st.markdown("""
 </style>
 """, unsafe_allow_html=True)
 
+# --- State Persistence Functions ---
+
+STATE_FILE_PATH = "mixer_app_state.pkl"
+
+def save_mixer_state_to_file(state: MixerState):
+    try:
+        with open(STATE_FILE_PATH, "wb") as f:
+            pickle.dump(state, f)
+        st.sidebar.success("Schedule and scores saved to disk.")
+    except Exception as e:
+        st.sidebar.error(f"Error saving state: {e}")
+
+def load_mixer_state_from_file():
+    if os.path.exists(STATE_FILE_PATH):
+        try:
+            with open(STATE_FILE_PATH, "rb") as f:
+                return pickle.load(f)
+        except Exception as e:
+            st.sidebar.error(f"Error loading saved state: {e}. Starting fresh.")
+            os.remove(STATE_FILE_PATH) # Remove potentially corrupted file
+            return None
+    return None
+
+# Initialize session_state for mixer_state if not present or after reset
+if "mixer_state" not in st.session_state:
+    st.session_state["mixer_state"] = load_mixer_state_from_file()
+
+# Set initial values for sidebar widgets based on loaded/current state
+if st.session_state["mixer_state"]:
+    players_text_initial = st.session_state["mixer_state"].config.players_text
+    num_pits_initial = st.session_state["mixer_state"].config.num_pits
+    target_games_per_player_initial = st.session_state["mixer_state"].config.target_games_per_player
+    if st.session_state["mixer_state"].result: # Only show info if there's an actual result
+        st.sidebar.info("Loaded previous schedule and scores.")
+else:
+    players_text_initial = DEFAULT_PLAYERS
+    num_pits_initial = 3
+    target_games_per_player_initial = 6
+
 # Input widgets
 st.sidebar.header("Configuration")
 players_text = st.sidebar.text_area(
     "Players (comma, newline, or space separated)",
-    value=DEFAULT_PLAYERS,
+    value=players_text_initial,
     height=150
 )
 
@@ -383,11 +425,11 @@ st.sidebar.write(f"Total Players: **{len(current_players)}**")
 
 num_pits = st.sidebar.slider(
     "Number of Pits",
-    min_value=1, max_value=10, value=3, step=1
+    min_value=1, max_value=10, value=num_pits_initial, step=1
 )
 target_games_per_player = st.sidebar.slider(
     "Target Games per Player",
-    min_value=1, max_value=50, value=6, step=1
+    min_value=1, max_value=50, value=target_games_per_player_initial, step=1
 )
 
 # Generate schedule button
@@ -400,12 +442,22 @@ if st.sidebar.button("Generate Schedule"):
     # arrangement_attempts is now defaulted to 5000 inside generate_schedule
     mixer_state = generate_schedule(config)
     st.session_state["mixer_state"] = mixer_state
-    # Initialize scores for new schedule
-    st.session_state['current_round_scores'] = {}
+    st.session_state['current_round_scores'] = {} # Reset scores input dict
+    if mixer_state.result: # Only save if generation was successful and no error
+        save_mixer_state_to_file(mixer_state)
+    st.rerun() # Rerun to update main display and sidebar values
 
+# Reset button
+if st.sidebar.button("Reset Schedule and Scores"):
+    if os.path.exists(STATE_FILE_PATH):
+        os.remove(STATE_FILE_PATH)
+    st.session_state["mixer_state"] = None
+    st.session_state['current_round_scores'] = {} # Clear any current score inputs
+    st.sidebar.success("Schedule and scores reset.")
+    st.rerun()
 
 # Display results
-if "mixer_state" in st.session_state:
+if st.session_state["mixer_state"]: # Check if mixer_state is not None
     mixer_state = st.session_state["mixer_state"]
 
     if mixer_state.error:
@@ -501,7 +553,9 @@ if "mixer_state" in st.session_state:
                             continue # Skip to the next match if conversion fails
 
                     st.session_state["mixer_state"] = mixer_state # Update session state to trigger rerun with new scores
+                    save_mixer_state_to_file(mixer_state) # Save state after scores are updated
                     st.success(f"Scores for Round {round_data.round_number} saved!")
+                    st.rerun() # Rerun to ensure display reflects saved scores and state
 
             st.markdown("</div>", unsafe_allow_html=True)
 
