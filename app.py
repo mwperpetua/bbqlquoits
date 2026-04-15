@@ -1,3 +1,4 @@
+!pip install cloudpickle
 import streamlit as st
 import random
 import math
